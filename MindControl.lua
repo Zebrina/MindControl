@@ -107,7 +107,7 @@ end
 local UnitShouldBeMindControlled = function(unit)
     return unit and ALLOWED_CREATURE_TYPES[UnitCreatureType(unit)] and not UnitIsPlayer(unit) and
            UnitCanAttack("player", unit) and not UnitIsPossessed(unit) and not UnitIsCharmed(unit) and
-           UnitClassification(unit) ~= "worldboss"
+           not UnitIsDead(unit) and UnitClassification(unit) ~= "worldboss"
 end
 if (IS_RETAIL) then
     -- Retail specific conditions.
