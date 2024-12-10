@@ -1,0 +1,10 @@
+## Interface: 30401
+## Version: 1.0.0
+## Title: Mind Control
+## Author: Zebrina
+## Notes: Notes.
+## SavedVariables: MindControlDatabase
+
+Localization.lua
+SpellDatabase.lua
+MindControl.lua
