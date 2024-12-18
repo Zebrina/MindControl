@@ -1,37 +1,76 @@
 local _, env = ...
 
+local DEVELOPMENT_ONLY
+do
+    local name, realm = UnitFullName("player")
+    DEVELOPMENT_ONLY = (name == "Zebrina") and (realm == "Ragnaros" or realm == "Golemagg" or realm == "LivingFlame")
+end
+
 local IS_RETAIL = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE)
+local IS_VANILLA = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
+local IS_TBC = (WOW_PROJECT_ID == WOW_PROJECT_TBC_CLASSIC)
 local IS_WRATH = (WOW_PROJECT_ID == WOW_PROJECT_WRATH_CLASSIC)
 local IS_CATACLYSM = (WOW_PROJECT_ID == WOW_PROJECT_CATACLYSM_CLASSIC)
-local IS_PRE_CATACLYSM = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC) or (WOW_PROJECT_ID == WOW_PROJECT_BURNING_CRUSADE_CLASSIC) or IS_WRATH
+local IS_PRE_CATACLYSM = IS_VANILLA or IS_TBC or IS_WRATH
+local IS_POST_WRATH = not IS_PRE_CATACLYSM
+local IS_PRE_WRATH = IS_VANILLA or IS_TBC
 
 local MIND_CONTROL_SPELLID = 605
-local MIND_CONTROL_TEXTURE = 136206 -- spell_shadow_shadowworddominate
+local MIND_CONTROL_ICON = 136206 -- spell_shadow_shadowworddominate
 local DOMINATE_MIND_SPELLID = 205364
-local DOMINATE_MIND_TEXTURE = 1386549 -- spell_priest_void-flay
-local PET_ATTACK_TEXTURE = 132152
-local OTHER_SPELLS_ICON = 136116 -- spell_nature_wispsplode
---local GNOMISH_UNIVERSAL_REMOTE_SPELLID = 9269
---local GNOMISH_UNIVERSAL_REMOTE_TEXTURE = 134376
---local CONTROL_MACHINE_SPELLID = 8345
+local DOMINATE_MIND_ICON = 1386549 -- spell_priest_void-flay
+local SUBJUGATE_DEMON_SPELLID = {
+    NumRanks = (IS_POST_WRATH and 1) or (IS_WRATH and 4) or 3,
+    [1] = {  -- Rank 1
+        SpellID = 1098,
+        MaxLevel = 45,
+    },
+    [2] = { -- Rank 2
+        SpellID = 11725,
+        MaxLevel = 59,
+    },
+    [3] = { -- Rank 3
+        SpellID = 11726,
+        MaxLevel = IS_VANILLA and 64 or 74, -- Increased to 74 in TBC.
+    },
+    [4] = { -- Rank 4 (Wrath)
+        SpellID = 61191,
+        MaxLevel = 84,
+    },
+}
 
 local PLAYER_CLASS = select(2, UnitClass("player"))
 
-local ALLOWED_CREATURE_TYPES = {
-    [env.Strings.Humanoid] = true,
-    -- This needs special logic.
-    --[env.Strings.Humanoid] = true,
-}
-if (IS_RETAIL) then
-    -- Additional creature types allowed in retail.
-    -- In retail the only creature types that can't be
-    -- mind controlled are: "Demon", "Undead" and "Mechanical"
-    -- Can even mind control critters! But not wild pets that can be battled.
-    ALLOWED_CREATURE_TYPES[env.Strings.Beast] = true
-    ALLOWED_CREATURE_TYPES[env.Strings.Critter] = true
-    ALLOWED_CREATURE_TYPES[env.Strings.Dragonkin] = true
-    ALLOWED_CREATURE_TYPES[env.Strings.Elemental] = true
-    ALLOWED_CREATURE_TYPES[env.Strings.Giant] = true
+local SUBJUGATE_DEMON_ICON = 136154
+local CONTROL_UNDEAD_SPELLID = 111673
+local CONTROL_UNDEAD_ICON = 237273 -- inv_misc_bone_skull_01
+local PET_ATTACK_ICON = 132152
+local OTHER_SPELLS_ICON = 136116 -- spell_nature_wispsplode
+--local GNOMISH_UNIVERSAL_REMOTE_SPELLID = 9269
+--local GNOMISH_UNIVERSAL_REMOTE_ICON = 134376
+--local CONTROL_MACHINE_SPELLID = 8345
+
+
+local ALLOWED_CREATURE_TYPES = {}
+do
+    if (PLAYER_CLASS == "PRIEST") then
+        ALLOWED_CREATURE_TYPES[env.Strings.Humanoid] = true
+        if (IS_RETAIL) then
+            -- Additional creature types allowed in retail.
+            -- In retail the only creature types that can't be
+            -- mind controlled are: "Demon", "Undead" and "Mechanical"
+            -- Can even mind control critters! But not wild pets that can be battled.
+            ALLOWED_CREATURE_TYPES[env.Strings.Beast] = true
+            ALLOWED_CREATURE_TYPES[env.Strings.Critter] = true
+            ALLOWED_CREATURE_TYPES[env.Strings.Dragonkin] = true
+            ALLOWED_CREATURE_TYPES[env.Strings.Elemental] = true
+            ALLOWED_CREATURE_TYPES[env.Strings.Giant] = true
+        end
+    elseif (PLAYER_CLASS == "WARLOCK") then
+        ALLOWED_CREATURE_TYPES[env.Strings.Demon] = true
+    elseif (PLAYER_CLASS == "DEATHKNIGHT") then
+        ALLOWED_CREATURE_TYPES[env.Strings.Undead] = true
+    end
 end
 
 local ActionButtons
@@ -53,9 +92,6 @@ if (IS_PRE_CATACLYSM) then
     end
 end
 
--------------------------------------------
--- GetSpellInfo(spell | index, bookType) --
--------------------------------------------
 local GetSpellInfo = _G.GetSpellInfo or C_Spell.GetSpellInfo
 if (IS_RETAIL) then
     -- Wrapper for GetSpellInfo to make it behave in retail as it does in classic.
@@ -69,88 +105,153 @@ if (IS_RETAIL) then
                spellInfo.maxRange, spellInfo.spellID, spellInfo.originalIconID
     end
 end
--------------------------------------------
 
-local GetMindControlSpellInfo
-if (IS_PRE_CATACLYSM) then
-    local mindControlHigherRanks = {
-        11446, -- Rank 4 (Wrath)
-        10912, -- Rank 3 (TBC)
-        10911, -- Rank 2
-    }
-    GetMindControlSpellInfo = function()
-        local spellID
-        for i = 1, #mindControlHigherRanks do
-            local spellID = mindControlHigherRanks[i]
-            if (IsPlayerSpell(spellID)) then
-                return GetSpellInfo(spellID)
-            end
+local GetSpellTexture = _G.GetSpellTexture or C_Spell.GetSpellTexture
+
+local function ReturnStaticValue(value)
+    return function() return value end
+end
+local function ReturnFalse()
+    return false
+end
+
+local MindControlSpellTable = {
+    SpellRankPresets = {
+        ["PRIEST"] = {
+            NumRanks = IS_PRE_WRATH and 3 or 1,
+            [1] = { -- Rank 1
+                GetSpellID = function()
+                    return IsPlayerSpell(DOMINATE_MIND_SPELLID) and DOMINATE_MIND_SPELLID or MIND_CONTROL_SPELLID
+                end,
+                GetMaxLevel = function()
+                    if (IS_PRE_WRATH) then
+                        return 44
+                    end
+                    local playerLevel = UnitLevel("player")
+                    if (IS_RETAIL) then
+                        return playerLevel + 1
+                    elseif (IS_WRATH) then
+                        return playerLevel + 2
+                    end
+                    -- Cataclysm and probably Mists of Pandaria as well.
+                    return playerLevel + 3
+                end,
+                IsFullControl = function(self)
+                    return self:GetSpellID() ~= DOMINATE_MIND_SPELLID
+                end,
+            },
+            [2] = { -- Rank 2
+                GetSpellID = ReturnStaticValue(10911),
+                GetMaxLevel = ReturnStaticValue(59),
+                IsFullControl = ReturnFalse,
+            },
+            [3] = { -- Rank 3
+                GetSpellID = ReturnStaticValue(10912),
+                GetMaxLevel = ReturnStaticValue(IS_VANILLA and 64 or 74), -- Increased to 74 in TBC.
+                IsFullControl = ReturnFalse,
+            },
+        },
+
+        ["WARLOCK"] = {
+            NumRanks = (IS_PRE_WRATH and 3) or (IS_WRATH and 4) or 1,
+            [1] = {  -- Rank 1
+                GetSpellID = ReturnStaticValue(1098),
+                GetMaxLevel = function()
+                    if (IS_PRE_CATACLYSM) then
+                        return 45
+                    end
+                    local playerLevel = UnitLevel("player")
+                    if (IS_RETAIL) then
+                        return playerLevel + 1
+                    end
+                    -- Cataclysm and probably Mists of Pandaria as well.
+                    return playerLevel + 3 -- TODO: Verify this. Wowhead spell description does not say!
+                end,
+                IsFullControl = ReturnFalse,
+            },
+            [2] = { -- Rank 2
+                GetSpellID = ReturnStaticValue(11725),
+                GetMaxLevel = ReturnStaticValue(59),
+                IsFullControl = ReturnFalse,
+            },
+            [3] = { -- Rank 3
+                GetSpellID = ReturnStaticValue(11726),
+                GetMaxLevel = ReturnStaticValue(IS_VANILLA and 64 or 74), -- Increased to 74 in TBC.
+                IsFullControl = ReturnFalse,
+            },
+            [4] = { -- Rank 4 (Wrath)
+                GetSpellID = ReturnStaticValue(61191),
+                GetMaxLevel = ReturnStaticValue(84),
+                IsFullControl = ReturnFalse,
+            },
+        },
+
+        ["DEATHKNIGHT"] = {
+            NumRanks = IS_RETAIL and 1 or 0,
+            [1] = {
+                GetSpellID = ReturnStaticValue(111673),
+                GetMaxLevel = function()
+                    return UnitLevel("player") + 1
+                end,
+                IsFullControl = ReturnFalse,
+            }
+        },
+    },
+}
+
+function MindControlSpellTable:Initialize()
+    self.SpellRanks = self.SpellRankPresets[PLAYER_CLASS]
+end
+MindControlSpellTable:Initialize()
+
+function MindControlSpellTable:GetSpellRank()
+    local spellRanks = self.SpellRanks
+    if (spellRanks == nil) then
+        return nil
+    end
+    for i = spellRanks.NumRanks, 1, -1 do
+        local rankTable = spellRanks[i]
+        if (IsPlayerSpell(rankTable:GetSpellID())) then
+            return rankTable
         end
-        return GetSpellInfo(MIND_CONTROL_SPELLID)
     end
-else
-    GetMindControlSpellInfo = function()
-        return GetSpellInfo(IsPlayerSpell(DOMINATE_MIND_SPELLID) and DOMINATE_MIND_SPELLID or MIND_CONTROL_SPELLID)
-    end
-end
-local function GetMindControlSpellInfo()
-    return GetSpellInfo(IsPlayerSpell(DOMINATE_MIND_SPELLID) and DOMINATE_MIND_SPELLID or MIND_CONTROL_SPELLID)
+    return nil
 end
 
-local function GetMindControlSpellIcon()
-    return select(3, GetMindControlSpellInfo())
+function MindControlSpellTable:GetSpellInfo()
+    local spellRank = self:GetSpellRank()
+    if (spellRank) then
+        return GetSpellInfo(spellRank:GetSpellID())
+    end
+    return nil
 end
 
---------------------------------------
--- UnitShouldBeMindControlled(unit) --
---------------------------------------
-local UnitShouldBeMindControlled = function(unit)
-    return unit and ALLOWED_CREATURE_TYPES[UnitCreatureType(unit)] and not UnitIsPlayer(unit) and
+function MindControlSpellTable:GetSpellID()
+    local spellRank = self:GetSpellRank()
+    return spellRank and spellRank:GetSpellID() or nil
+end
+
+function MindControlSpellTable:GetMaxLevel()
+    local spellRank = self:GetSpellRank()
+    return spellRank and spellRank:GetMaxLevel() or -999
+end
+
+function MindControlSpellTable:IsFullControl()
+    local spellRank = self:GetSpellRank()
+    return spellRank and spellRank:IsFullControl() or nil
+end
+
+local function UnitShouldBeMindControlled(unit)
+    if (unit == nil) then
+        return false
+    end
+    local unitLevel = UnitLevel(unit)
+    return unitLevel >= 1 and ALLOWED_CREATURE_TYPES[UnitCreatureType(unit)] and not UnitIsPlayer(unit) and
            UnitCanAttack("player", unit) and not UnitIsPossessed(unit) and not UnitIsCharmed(unit) and
-           not UnitIsDead(unit) and UnitClassification(unit) ~= "worldboss"
+           not UnitIsDead(unit) and UnitClassification(unit) ~= "worldboss" and
+           unitLevel <= MindControlSpellTable:GetMaxLevel() and
+           (UnitIsCivilian == nil or not UnitIsCivilian(unit)) -- UnitIsCivilian is removed in TBC along with the honor system.
 end
-if (IS_RETAIL) then
-    -- Retail specific conditions.
-    local base = UnitShouldBeMindControlled
-    UnitShouldBeMindControlled = function(unit)
-        if (not base(unit)) then
-            return false
-        end
-        return IsPlayerSpell(MIND_CONTROL_SPELLID) and UnitLevel(unit) <= UnitLevel("player") + 1
-    end
-elseif (IS_CATACLYSM) then
-    -- Cataclysm specific conditions.
-    local base = UnitShouldBeMindControlled
-    UnitShouldBeMindControlled = function(unit)
-        if (not base(unit)) then
-            return false
-        end
-        return IsPlayerSpell(MIND_CONTROL_SPELLID) and UnitLevel(unit) <= UnitLevel("player") + 3
-    end
-else
-    -- Classic specific conditions.
-    local base = UnitShouldBeMindControlled
-    UnitShouldBeMindControlled = function(unit)
-        if (not base(unit)) then
-            return false
-        end
-        local function MaxLevelAllowed()
-            if (IsPlayerSpell(11446)) then -- Rank 4 (Wrath)
-                return 82
-            elseif (IsPlayerSpell(10912)) then -- Rank 3 (TBC)
-                return 74
-            elseif (IsPlayerSpell(10911)) then -- Rank 2
-                return 59
-            elseif (IsPlayerSpell(605)) then -- Rank 1
-                return 44
-            end
-            return -1
-        end
-        -- UnitIsCivilian is removed in TBC.
-        return (not UnitIsCivilian or not UnitIsCivilian(unit)) and UnitLevel(unit) <= MaxLevelAllowed()
-    end
-end
---------------------------------------
 
 local function UnitIsCritter(unit)
     return UnitCreatureType(unit) == env.Strings.Critter
@@ -179,6 +280,14 @@ local function FormatIcon(texture)
     return (texture and "|T"..texture..":"..iconSize.."|t ") or ""
 end
 
+local function FormatBindingKey(command, leadingSpace, trailingSpace)
+    local key = GetBindingKey(command)
+    if (key) then
+        return (leadingSpace and " " or "").."["..GetBindingText(key, false).."]"..(trailingSpace and " " or "")
+    end
+    return ""
+end
+
 local function FormatSpellCastTime(castTime)
     return (castTime < 0 and "Attack speed") or (castTime > 0 and ((castTime / 1000).." sec cast"))
 end
@@ -192,9 +301,9 @@ end
 
 local function FormatSpellInfo(data, spellID)
     local showCastTime, showRange, showCooldown = 1, nil, 1
-    local spellName, _, spellIcon, spellCastTime, spellMinRange, spellMaxRange = GetSpellInfo(spellID)
+    local spellName, _, _, spellCastTime, spellMinRange, spellMaxRange = GetSpellInfo(spellID)
 
-    local spellText = FormatIcon(spellIcon)..spellName
+    local spellText = spellName
     local infoText = nil
 
     local function AppendInfoText(text)
@@ -244,11 +353,12 @@ function MindControlFrame.Events:ADDON_LOADED(addOnName)
             end
 
             local data = db:GetData(npcID)
+            local name, _, icon = MindControlSpellTable:GetSpellInfo()
+            local canMindControl = (name ~= nil)
 
-            if ((data == nil or not data:HasBeenMindControlled()) and PLAYER_CLASS == "PRIEST" and
+            if (canMindControl and (data == nil or not data:HasBeenMindControlled()) and
                 UnitShouldBeMindControlled(unit) and not UnitIsCritter(unit)) then
 
-                local name, _, icon = GetMindControlSpellInfo()
                 self:AddLine(FormatIcon(icon)..string.format(env.Strings.CastMindControl, name), GRAY_FONT_COLOR:GetRGB())
             end
             
@@ -256,37 +366,37 @@ function MindControlFrame.Events:ADDON_LOADED(addOnName)
                 return
             end
 
-            local name, _, icon = GetMindControlSpellInfo()
             local mindControlSpells = nil
 
             if (data:IsImmune()) then
-                self:AddLine(FormatIcon(icon)..string.format(env.Strings.MindControlImmune, name), RED_FONT_COLOR:GetRGB())
-            else
+                self:AddLine(FormatIcon(icon)..env.Strings.Immune, RED_FONT_COLOR:GetRGB())
+            elseif (data:IsInvalidTarget()) then
+                self:AddLine(FormatIcon(icon)..env.Strings.InvalidTarget, ORANGE_FONT_COLOR:GetRGB())
+            elseif (canMindControl) then
                 mindControlSpells = data:GetMindControlSpells()
                 if (mindControlSpells) then
                     local headerAdded = false
-                    local isUsingDominateMind = IsPlayerSpell(DOMINATE_MIND_SPELLID)
-                    
+                    local isFullControl = MindControlSpellTable:IsFullControl()
+
                     for i = 2, NUM_PET_ACTION_SLOTS do
                         local spellID = mindControlSpells[i]
                         if (spellID) then
                             if (not headerAdded) then
                                 headerAdded = true
 
-                                self:AddLine(string.format(env.Strings.MindControlAbilties, name)..FormatIcon(icon), WHITE_FONT_COLOR:GetRGB())
+                                self:AddLine(string.format(env.Strings.MindControlSpells, name)..FormatIcon(icon), WHITE_FONT_COLOR:GetRGB())
 
                                 if (MindControlConfig.TooltipShowAttack) then
                                     local key = GetBindingKey("ACTIONBUTTON1")
-                                    self:AddLine(FormatIcon(PET_ATTACK_TEXTURE)..env.Strings.Attack..(key and " ["..GetBindingText(key, false).."]"))
+                                    self:AddLine(FormatIcon(PET_ATTACK_ICON)..env.Strings.Attack..(key and " ["..GetBindingText(key, false).."]"))
                                 end
                             end
 
-                            if (not isUsingDominateMind) then
-                                local key = GetBindingKey("ACTIONBUTTON"..(IS_RETAIL and i or (i - 2)))
-                                self:AddLine(FormatSpellInfo(data, spellID)..(key and " ["..GetBindingText(key, false).."]"))
+                            if (isFullControl) then
+                                self:AddLine(FormatIcon(GetSpellTexture(spellID))..FormatBindingKey("ACTIONBUTTON"..(IS_RETAIL and i or (i - 2)), false, true)..FormatSpellInfo(data, spellID))
                             else
-                                -- No need to show hotkey when using Dominate Mind.
-                                self:AddLine(FormatSpellInfo(data, spellID))
+                                -- If we don't have full control (moving, jumping etc.) show pet keybinds.
+                                self:AddLine(FormatIcon(GetSpellTexture(spellID))..FormatBindingKey("BONUSACTIONBUTTON"..i, false, true)..FormatSpellInfo(data, spellID))
                             end
                         end
                     end
@@ -309,7 +419,7 @@ function MindControlFrame.Events:ADDON_LOADED(addOnName)
                             end
                         end
 
-                        self:AddLine(FormatSpellInfo(data, spellID))
+                        self:AddLine(FormatIcon(GetSpellTexture(spellID))..FormatSpellInfo(data, spellID))
                     end
                 end
             end
@@ -323,11 +433,11 @@ function MindControlFrame.Events:ADDON_LOADED(addOnName)
 
         self:UnregisterEvent("ADDON_LOADED")
 
-        DEFAULT_CHAT_FRAME:AddMessage(FormatIcon(MIND_CONTROL_TEXTURE).."MindControl loaded.", YELLOW_FONT_COLOR:GetRGB())
-        local npcCount, immuneCount, spellCount, mindControlSpellCount = db:GetStatistics()
-        if (npcCount >= 2 and spellCount >= 2) then
-            DEFAULT_CHAT_FRAME:AddMessage(npcCount.." npcs recorded. "..immuneCount.." of those are immune.", YELLOW_FONT_COLOR:GetRGB())
-            DEFAULT_CHAT_FRAME:AddMessage(spellCount.." spells recorded. "..mindControlSpellCount.." of those are available during Mind Control.", YELLOW_FONT_COLOR:GetRGB())
+        DEFAULT_CHAT_FRAME:AddMessage(FormatIcon(MIND_CONTROL_ICON).."MindControl loaded.", YELLOW_FONT_COLOR:GetRGB())
+        if (DEVELOPMENT_ONLY) then
+            local npcCount, immuneCount, invalidTargetCount, spellCount, mindControlSpellCount = db:GetStatistics()
+            DEFAULT_CHAT_FRAME:AddMessage(npcCount.." npcs recorded, "..immuneCount.." immune, and "..invalidTargetCount.." invalid target(s).", YELLOW_FONT_COLOR:GetRGB())
+            DEFAULT_CHAT_FRAME:AddMessage(spellCount.." spells recorded. "..mindControlSpellCount.." spells recorded during Mind Control.", YELLOW_FONT_COLOR:GetRGB())
         end
     end
 end
@@ -348,16 +458,12 @@ function MindControlFrame:HandleMindControlledUnitData()
     local data = db:GetOrCreateData(npcID)
     data:MarkAsMindControlled()
 
-    local isUsingDominateMind = IsPlayerSpell(DOMINATE_MIND_SPELLID)
+    local isFullControl = MindControlSpellTable:IsFullControl()
 
     for i = 2, NUM_PET_ACTION_SLOTS do
         local spellID = select(7, GetPetActionInfo(i))
         if (spellID) then
-            if (not isUsingDominateMind) then
-                data:AddMindControlSpell(i, spellID)
-            else
-                data:AddSpell(spellID)
-            end
+            data:AddMindControlSpell(i, spellID)
         end
     end
 end
@@ -419,7 +525,7 @@ function MindControlFrame.Events:COMBAT_LOG_EVENT_UNFILTERED()
     local _, event, _, casterGUID, _, _, _, targetGUID, _, _, _, spellID, spellName, _, info = CombatLogGetCurrentEventInfo()
 
     if (event == "SPELL_MISSED") then
-        if (not (info == "IMMUNE" and spellName == GetMindControlSpellInfo())) then
+        if (not (info == "IMMUNE" and spellName == MindControlSpellTable:GetSpellInfo())) then
             return
         end
 
@@ -452,9 +558,9 @@ function MindControlFrame.Events:COMBAT_LOG_EVENT_UNFILTERED()
         data:AddSpell(spellID)
         data:MarkSpellAsBuff(spellID)
 
-        if (not data:IsSpellBuffAnnounced(spellID)) then
+        if (IS_RETAIL and not data:IsSpellBuffAnnounced(spellID)) then
             local unitToken = UnitTokenFromGUID(casterGUID)
-            if (UnitShouldBeMindControlled(unitToken)) then
+            if (MindControlSpellTable:GetSpellInfo() and UnitShouldBeMindControlled(unitToken)) then
                 -- Might not be a good idea to rely on
                 -- unitToken refering to the same unit
                 -- after the spell query.
@@ -468,13 +574,63 @@ function MindControlFrame.Events:COMBAT_LOG_EVENT_UNFILTERED()
 
                     data:MarkSpellBuffAnnounced()
 
-                    DEFAULT_CHAT_FRAME:AddMessage(FormatIcon(MIND_CONTROL_TEXTURE)..env.Strings.PotentialBuff.." "..unitName, YELLOW_FONT_COLOR:GetRGB())
+                    DEFAULT_CHAT_FRAME:AddMessage(FormatIcon(MIND_CONTROL_ICON)..env.Strings.PotentialBuff.." "..unitName, YELLOW_FONT_COLOR:GetRGB())
                     local name, _, icon = GetSpellInfo(spellID)
-                    --DEFAULT_CHAT_FRAME:AddMessage(FormatSpellInfo(data, spellID), YELLOW_FONT_COLOR:GetRGB())
+                    --DEFAULT_CHAT_FRAME:AddMessage(FormatIcon(GetSpellTexture(spellID))..FormatSpellInfo(data, spellID), YELLOW_FONT_COLOR:GetRGB())
                     DEFAULT_CHAT_FRAME:AddMessage(FormatIcon(icon)..name..": "..queriedSpell:GetSpellDescription(), YELLOW_FONT_COLOR:GetRGB())
                 end)
             end
         end
+    end
+end
+
+function MindControlFrame.Events:UNIT_SPELLCAST_SENT(unit, targetName, castGUID, spellID)
+    if (unit ~= "player") then
+        return
+    end
+
+    if (spellID ~= MindControlSpellTable:GetSpellID()) then
+        return
+    end
+
+    local target = (UnitName("target") == targetName and "target") or
+                   (UnitName("mouseover") == targetName and "mouseover") or
+                   (UnitName("focus") == targetName and "focus") or nil
+
+    if (target) then
+        local type, _, _, _, npcID = UnitInfoFromTarget(target)
+        if (type == "Creature") then
+            self.lastMindControlTarget = npcID
+        end
+    end
+end
+
+function MindControlFrame.Events:UNIT_SPELLCAST_START(unitTarget, castGUID, spellID)
+    if (unitTarget ~= "player") then
+        return
+    end
+
+    self.lastMindControlTarget = nil
+end
+
+function MindControlFrame.Events:UNIT_SPELLCAST_FAILED(unitTarget, castGUID, spellID)
+    if (unitTarget ~= "player") then
+        return
+    end
+
+    if (spellID ~= MindControlSpellTable:GetSpellID()) then
+        return
+    end
+
+-- TODO: Check cast guid?
+    -- Scarshield Quartmaster castGUID: Cast-3-3769-0-125-605-??????????
+    --print("UNIT_SPELLCAST_FAILED", unitTarget, castGUID, spellID, self.attemptMindControl)
+
+    if (self.lastMindControlTarget) then
+        local data = db:GetOrCreateData(self.lastMindControlTarget)
+        data:MarkAsInvalidTarget()
+        self.lastMindControlTarget = nil
+        print("marked as invalid target")
     end
 end
 
@@ -500,17 +656,17 @@ function MindControlFrame.Events:UPDATE_BINDINGS()
         end
     end
 
-    local bindingsBody = ""
+    local bindingsBlock = ""
     for keys, command in pairs(bindings) do
         for _, key in pairs({ string.split(",", keys) }) do
-            bindingsBody = bindingsBody..string.format([[
+            bindingsBlock = bindingsBlock..string.format([[
                 self:SetBinding(true, "%s", "%s");
             ]], key, command)
         end
     end
 
-    local setPointBody = ""
-    local restorePointBody = ""
+    local setPointBlock = ""
+    local restorePointBlock = ""
     if (IS_PRE_CATACLYSM) then
         local point2, relativeTo2, relativePoint2, offsetX2, offsetY2 = PetActionButton2:GetPoint()
         local relativeTo2Name = relativeTo2:GetName()
@@ -524,7 +680,7 @@ function MindControlFrame.Events:UPDATE_BINDINGS()
         MindControlStateFrame:SetFrameRef("PetActionButton3", PetActionButton3)
         MindControlStateFrame:SetFrameRef("PetActionButton4", PetActionButton4)
         
-        setPointBody = string.format([[
+        setPointBlock = string.format([[
             local %s = self:GetFrameRef("%s");
             local PetActionButton2 = self:GetFrameRef("PetActionButton2");
             local PetActionButton3 = self:GetFrameRef("PetActionButton3");
@@ -537,7 +693,7 @@ function MindControlFrame.Events:UPDATE_BINDINGS()
             PetActionButton3:Hide();
         ]], relativeTo2Name, relativeTo2Name, point2, relativeTo2Name, relativePoint2, offsetX2, offsetY2)
 
-        restorePointBody = string.format([[
+        restorePointBlock = string.format([[
             local %s = self:GetFrameRef("%s");
             local PetActionButton2 = self:GetFrameRef("PetActionButton2");
             local PetActionButton3 = self:GetFrameRef("PetActionButton3");
@@ -551,7 +707,7 @@ function MindControlFrame.Events:UPDATE_BINDINGS()
         ]], relativeTo4Name, relativeTo4Name, point4, relativeTo4Name, relativePoint4, offsetX4, offsetY4)
     end
 
-    local finalBody = string.format([[
+    local body = string.format([[
         if (newstate == "mcbegin") then
             do %s end;
             do %s end;
@@ -559,11 +715,11 @@ function MindControlFrame.Events:UPDATE_BINDINGS()
             self:ClearBindings();
             do %s end;
         end
-    ]], bindingsBody, setPointBody, restorePointBody)
+    ]], bindingsBlock, setPointBlock, restorePointBlock)
 
-    finalBody = string.gsub(finalBody, "%s+", " ")
+    body = string.gsub(body, "%s+", " ")
 
-    MindControlStateFrame:SetAttribute("_onstate-mindcontrolbinds", finalBody)
+    MindControlStateFrame:SetAttribute("_onstate-mindcontrolbinds", body)
 end
 
 RegisterStateDriver(MindControlStateFrame, "mindcontrolbinds", "[pet,channeling:Mind Control][pet,channeling:Control Machine] mcbegin; mcend")

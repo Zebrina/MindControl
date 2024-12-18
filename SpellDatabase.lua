@@ -44,6 +44,7 @@ end
 function DatabasePrototype:GetStatistics()
     local npcCount = 0
     local immuneCount = 0
+    local invalidTargetCount = 0
     local spellCount = 0
     local mindControlSpellCount = 0
 
@@ -58,6 +59,8 @@ function DatabasePrototype:GetStatistics()
 
         if (data.m == 1) then
             immuneCount = immuneCount + 1
+        elseif (data.m == 2) then
+            invalidTargetCount = invalidTargetCount + 1
         elseif (data.m) then
             for spell in pairs(data.m) do
                 mindControlSpellCount = mindControlSpellCount + 1
@@ -65,7 +68,7 @@ function DatabasePrototype:GetStatistics()
         end
     end
 
-    return npcCount, immuneCount, spellCount, mindControlSpellCount
+    return npcCount, immuneCount, invalidTargetCount, spellCount, mindControlSpellCount
 end
 
 function DatabasePrototype:GetData(npcID)
@@ -91,7 +94,7 @@ function DataPrototype:HasBeenMindControlled()
 end
 
 function DataPrototype:MarkAsMindControlled()
-    if (self.m == nil or self:IsImmune()) then
+    if (type(self.m) ~= "table") then
         self.m = {}
     end
 end
@@ -101,8 +104,18 @@ function DataPrototype:IsImmune()
 end
 
 function DataPrototype:MarkAsImmune()
-    if (self.m == nil) then
+    if (self.m == nil or self.m == 2) then
         self.m = 1
+    end
+end
+
+function DataPrototype:IsInvalidTarget()
+    return self.m == 2
+end
+
+function DataPrototype:MarkAsInvalidTarget()
+    if (self.m == nil) then
+        self.m = 2
     end
 end
 
@@ -153,7 +166,7 @@ function DataPrototype:MarkSpellBuffAnnounced(spellID)
 end
 
 function DataPrototype:GetMindControlSpells()
-    if (self:IsImmune()) then
+    if (self:IsImmune() or self:IsInvalidTarget()) then
         return nil
     end
     return self.m

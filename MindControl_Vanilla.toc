@@ -2,7 +2,7 @@
 ## Version: 1.0.0
 ## Title: Mind Control
 ## Author: Zebrina
-## Notes: Notes.
+## Notes: Notes. Also works for Warlocks!
 ## SavedVariables: MindControlDatabase
 
 Localization.lua
